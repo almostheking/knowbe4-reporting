@@ -22,6 +22,7 @@ def _Opt_Help ():
                 python send-report2.py -a <API Key> -c CSCP -r somebody@company.com -s me@company.com -p <sender's app password>
 
             -h : print this help text.
+            -e : exclude reporting on training campaigns that have "New Hire" in their names.
             -a : the API key belonging to the KB4 admin account associated with the desired client.
             -c : the client name or acronym to be used when naming the report file. Has no bearing on the targeted KB4 client.
             -r : the recipient that will receive the email with the attached report.
@@ -31,18 +32,23 @@ def _Opt_Help ():
 
     print(help)
 
-def _Fetch_Report (api):
+def _Fetch_Report (api, exclude_newhire):
     header = {"Authorization": "Bearer "+api}
 
     campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/training/campaigns",headers=header)
 
     campaign_data = json.loads(campaign_status_resp.text)
 
+    # cycle through all campaigns and grab ones that are "In Progress"
     active_campaigns = []
     for campaign in campaign_data:
-        if campaign.get('status') == "In Progress":
+        if "New Hire" in campaign.get('name') and exclude_newhire == True:
+            print("New Hire camp detected.")
+            continue
+        elif campaign.get('status') == "In Progress":
             active_campaigns.append(campaign)
 
+    # cycle through "In Progress" camapaigns and gather completion status for each user enrolled
     for campaign in active_campaigns:
         campaign_id = campaign['campaign_id']
         campaign_name = campaign['name']
@@ -51,7 +57,7 @@ def _Fetch_Report (api):
 
         custom_enrollments = []
         for enrollment in enrollments:
-            if "New Hire" in campaign_name and enrollment['status'] == "Passed":
+            if "New Hire" in campaign_name and enrollment['status'] == "Passed": # do not report on new hires who have completed their new hire training
                 continue
             else:
                 enroll = {}
@@ -72,6 +78,7 @@ def _Fetch_Report (api):
 def _Create_CSV (enrollments, client):
     report_name = client+" Training Completion Status.csv"
 
+    # build csv file using enrollments dict generated in _Fetch_Report()
     with open(report_name, "w", newline="") as csv_file:
         columns = ["name","email","manager","campaign","module","status"]
         w = csv.DictWriter(csv_file, fieldnames=columns)
@@ -80,6 +87,7 @@ def _Create_CSV (enrollments, client):
 
     return report_name
 
+# construct email to send that contains csv attachment
 def _Send_Email (recipient, sender, password, report_name):
     msg = MIMEMultipart()
     msg["From"] = sender
@@ -129,7 +137,7 @@ def _Send_Email (recipient, sender, password, report_name):
 
 def main (argv):
     try:
-        opts, args = getopt.getopt(argv,"a:c:r:s:p:",["api=","client=","recipient=","sender","password"])
+        opts, args = getopt.getopt(argv,"ea:c:r:s:p:",["api=","client=","recipient=","sender","password"])
     except getopt.GetoptError:
         _Opt_Help()
         exit(2)
@@ -138,8 +146,11 @@ def main (argv):
         _Opt_Help()
         exit(2)
 
+    exclude_newhire = False
     for opt, arg in opts:
-        if opt == "-a":
+        if opt == "-e":
+            exclude_newhire = True
+        elif opt == "-a":
             api = arg
         elif opt == "-c":
             client = arg
@@ -153,12 +164,15 @@ def main (argv):
             _Opt_Help()
             exit(2)
 
-    enrollments = _Fetch_Report(api)
+    # fetch enrollments via API
+    enrollments = _Fetch_Report(api, exclude_newhire)
 
-    report_name = _Create_CSV(enrollments, client)
-
-    _Send_Email(recipient, sender, password, report_name)
-
-    os.remove(report_name)
+    # check if enrollments is empty, doesn't send report if so
+    if enrollments:
+        report_name = _Create_CSV(enrollments, client)
+        _Send_Email(recipient, sender, password, report_name)
+        os.remove(report_name) # delete report file after sent
+    else:
+        exit()
 
 main(argv[1:])
