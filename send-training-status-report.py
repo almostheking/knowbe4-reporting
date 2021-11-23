@@ -42,8 +42,8 @@ def _Fetch_Report (api, exclude_newhire):
     # cycle through all campaigns and grab ones that are "In Progress"
     active_campaigns = []
     for campaign in campaign_data:
+        print(campaign.get('name'))
         if "New Hire" in campaign.get('name') and exclude_newhire == True:
-            print("New Hire camp detected.")
             continue
         elif campaign.get('status') == "In Progress":
             active_campaigns.append(campaign)
