@@ -1,5 +1,6 @@
 from sys import exit, argv
 import os
+import time
 import getopt
 import requests
 import json
@@ -65,9 +66,9 @@ def _Fetch_Report (api, exclude_newhire):
                 enroll['email'] = enrollment['user']['email']
 
                 user_id = str(enrollment['user']['id'])
+                time.sleep(1)
                 get_user = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/users/"+user_id,headers=header).text)
                 enroll['manager'] = get_user['manager_name']
-
                 enroll['campaign'] = campaign_name
                 enroll['module'] = enrollment['module_name']
                 enroll['status'] = enrollment['status']
