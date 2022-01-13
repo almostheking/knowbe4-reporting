@@ -17,10 +17,13 @@ from email.mime.image import MIMEImage
 from email.mime.text import MIMEText
 
 def _Opt_Help ():
-    help = r"""This script sends a training progress CSV report to a recipient of your choice.
-    You must provide this script with five parameters.
-           Example Usage:
-                python send-report2.py -a <API Key> -c CSCP -r somebody@company.com -s me@company.com -p <sender's app password>
+    help = r"""This script sends a training progress or phish simulation failure CSV report to a recipient of your choice.
+    You must provide this script with the six parameters laid out in the top example below.
+           Example Usages:
+                Generate and send a weekly training report that only includes training status for active campaigns and, optionally, "New Hire" campaigns
+                    python send-report2.py -a <API Key> -t wt -c ACME -r recipient@company.com -s sender@company.com -p <sender's app password>
+                Generate and send a full KnowBe4 raw data report for the past three months of activity (AKA, the last quarter)
+                    python send-report2.py -a <API Key> -t a -f quarter -c ACME -r recipient@company.com -s sender@company.com -p <sender's app password>
 
             -h : print this help text.
             -e : exclude reporting on training campaigns that have "New Hire" in their names.
@@ -29,6 +32,8 @@ def _Opt_Help ():
             -r : the recipient that will receive the email with the attached report.
             -s : the address you'll use for sending the report. This should be an organization approved account. The script is written to support O365 and an app password.
             -p : the email sender password, so that the client can authenticate in order to send the report on your behalf. The script is written to support O365 and an app password. Will not support MFA.
+            -t : the type of report; acceptable inputs include "wt" for weekly training report, "t" for training report requiring timeframe, "p" for phishing report requiring timeframe, and "a" for full report requiring timeframe.
+            -f : the time period to include in the report(s); acceptable inputs include "year," "last_year," "year_to_date," "quarter," "month," and "week."
     """
 
     print(help)
@@ -54,7 +59,7 @@ def _Fetch_Report (api, exclude_newhire):
         campaign_id = campaign['campaign_id']
         campaign_name = campaign['name']
 
-        enrollments = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/training/enrollments",params={"campaign_id": campaign_id},headers=header).text)
+        enrollments = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/training/enrollments",params={"campaign_id": campaign_id,"per_page": 500},headers=header).text)
 
         custom_enrollments = []
         for enrollment in enrollments:
@@ -68,11 +73,14 @@ def _Fetch_Report (api, exclude_newhire):
                 user_id = str(enrollment['user']['id'])
                 time.sleep(1)
                 get_user = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/users/"+user_id,headers=header).text)
-                enroll['manager'] = get_user['manager_name']
-                enroll['campaign'] = campaign_name
-                enroll['module'] = enrollment['module_name']
-                enroll['status'] = enrollment['status']
-                custom_enrollments.append(enroll)
+                if get_user['status'] == 'archived':
+                    continue
+                else:
+                    enroll['manager'] = get_user['manager_name']
+                    enroll['campaign'] = campaign_name
+                    enroll['module'] = enrollment['module_name']
+                    enroll['status'] = enrollment['status']
+                    custom_enrollments.append(enroll)
 
         return custom_enrollments
 
