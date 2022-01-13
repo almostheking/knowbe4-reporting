@@ -1,4 +1,8 @@
-from sys import exit, argv
+from sys import exit, argv, version
+print(version)
+from datetime import datetime, timezone
+#import dateutil
+from dateutil.relativedelta import relativedelta
 import os
 import time
 import getopt
@@ -27,6 +31,7 @@ def _Opt_Help ():
 
             -h : print this help text.
             -e : exclude reporting on training campaigns that have "New Hire" in their names.
+            -i : indicates the script will be interactive on the CLI; without this, the script will fail with error messages if missing required variables.
             -a : the API key belonging to the KB4 admin account associated with the desired client.
             -c : the client name or acronym to be used when naming the report file. Has no bearing on the targeted KB4 client.
             -r : the recipient that will receive the email with the attached report.
@@ -37,33 +42,48 @@ def _Opt_Help ():
     """
 
     print(help)
+    exit(2)
 
-def _Fetch_Report (api, exclude_newhire):
-    header = {"Authorization": "Bearer "+api}
+def _Choose_Type ():
+    prmpt = r"""Choose a report type
+    """
 
+def _Calc_Date (datenow, frequency):
+    if frequency == "quarter":
+        subtrct = 3
+    datepast = datenow - relativedelta(months=subtrct)
+    print("datepast: " + str(datepast))
+    return datepast
+
+def _Get_T_Campaigns (header):
+    print("Getting list of campaigns via KnowBe4 API...")
     campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/training/campaigns",headers=header)
+    return json.loads(campaign_status_resp.text)
 
-    campaign_data = json.loads(campaign_status_resp.text)
+def _Fetch_WT_Report (header, exclude_newhire):
+    custom_enrollments = []# this is the list of report data we'll be returning from this function
 
-    # cycle through all campaigns and grab ones that are "In Progress"
+    campaign_data = _Get_T_Campaigns(header)
+
+    print("Generating list of In Progress campaigns...")
     active_campaigns = []
-    for campaign in campaign_data:
-        print(campaign.get('name'))
+    for campaign in campaign_data:# cycle through all campaigns and grab ones that are "In Progress"
         if "New Hire" in campaign.get('name') and exclude_newhire == True:
+            print("Skipping New Hire campaign...")
             continue
         elif campaign.get('status') == "In Progress":
+            print(campaign['name'] + " is In Progress. Adding to list...")
             active_campaigns.append(campaign)
 
-    # cycle through "In Progress" camapaigns and gather completion status for each user enrolled
-    for campaign in active_campaigns:
-        campaign_id = campaign['campaign_id']
-        campaign_name = campaign['name']
+    print("Getting list of enrollments for each In Progress campaign via KnowBe4 API...")
+    for campaign in active_campaigns:# cycle through "In Progress" campaigns and gather completion status for each user enrolled
 
+        campaign_id = campaign['campaign_id']
         enrollments = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/training/enrollments",params={"campaign_id": campaign_id,"per_page": 500},headers=header).text)
 
-        custom_enrollments = []
+        campaign_name = campaign['name']
         for enrollment in enrollments:
-            if "New Hire" in campaign_name and enrollment['status'] == "Passed": # do not report on new hires who have completed their new hire training
+            if "New Hire" in campaign_name and enrollment['status'] == "Passed":# do not report on new hires who have completed their new hire training
                 continue
             else:
                 enroll = {}
@@ -82,13 +102,42 @@ def _Fetch_Report (api, exclude_newhire):
                     enroll['status'] = enrollment['status']
                     custom_enrollments.append(enroll)
 
-        return custom_enrollments
+    return custom_enrollments
+
+def _Fetch_T_Report (header, frequency, datenow):
+    custom_enrollments = []# this is the list of report data we'll be returning from this function
+
+    campaign_data = _Get_T_Campaigns(header)
+
+    print("Generating list of campaigns that fit the given timeframe: " + frequency + " ...")
+    recent_campaigns = []
+    datepast = _Calc_Date(datenow, frequency)
+
+
+    for campaign in campaign_data:# cycle through all campaigns and grab ones that fit within the given frequency
+        print(campaign['name'])
+        if campaign['end_date'] == None:
+            print("Campaign detected with Null end_date. Probably New Hire!")
+            exit()
+        if datetime.strptime(campaign['end_date'], "%Y-%m-%dT%H:%M:%S.%f%z") > datepast:# if campaign's end date is newer than the oldest point for which this report is looking...
+            print("You got a campaign match, buddy!")
+        #
+        #
+        #
+        # if "New Hire" in campaign.get('name') and exclude_newhire == True:
+        #     print("Skipping New Hire campaign...")
+        #     continue
+        # elif campaign.get('status') == "In Progress":
+        #     print(campaign['name'] + " is In Progress. Adding to list...")
+        #     active_campaigns.append(campaign)
+    exit()
 
 def _Create_CSV (enrollments, client):
+
+    print("Generating CSV report to send...")
     report_name = client+" Training Completion Status.csv"
 
-    # build csv file using enrollments dict generated in _Fetch_Report()
-    with open(report_name, "w", newline="") as csv_file:
+    with open(report_name, "w", newline="") as csv_file:# build csv file using data dict generated in API call function
         columns = ["name","email","manager","campaign","module","status"]
         w = csv.DictWriter(csv_file, fieldnames=columns)
         w.writeheader()
@@ -98,6 +147,7 @@ def _Create_CSV (enrollments, client):
 
 # construct email to send that contains csv attachment
 def _Send_Email (recipient, sender, password, report_name):
+    print("Sending CSV report as " + sender + "...")
     msg = MIMEMultipart()
     msg["From"] = sender
     msg["To"] = recipient
@@ -146,19 +196,22 @@ def _Send_Email (recipient, sender, password, report_name):
 
 def main (argv):
     try:
-        opts, args = getopt.getopt(argv,"ea:c:r:s:p:",["api=","client=","recipient=","sender","password"])
+        opts, args = getopt.getopt(argv,"eia:c:r:s:p:t:f:",["api=","client=","recipient=","sender","password","type=","frequency="])
     except getopt.GetoptError:
         _Opt_Help()
-        exit(2)
 
     if len(argv) == 0:
         _Opt_Help()
-        exit(2)
 
     exclude_newhire = False
+    interactive = False
+    type_list = ["wt", "t", "p", "a"]
+    frequency_list = ["year", "last_year", "year_to_date", "quarter", "month", "week"]
     for opt, arg in opts:
         if opt == "-e":
             exclude_newhire = True
+        elif opt == "-i":
+            interactive = True
         elif opt == "-a":
             api = arg
         elif opt == "-c":
@@ -169,19 +222,39 @@ def main (argv):
             sender = arg
         elif opt == "-p":
             password = arg
+        elif opt == "-t":
+            type = arg
+        elif opt == "-f":
+            frequency = arg
         else:
             _Opt_Help()
-            exit(2)
 
-    # fetch enrollments via API
-    enrollments = _Fetch_Report(api, exclude_newhire)
-
-    # check if enrollments is empty, doesn't send report if so
-    if enrollments:
-        report_name = _Create_CSV(enrollments, client)
-        _Send_Email(recipient, sender, password, report_name)
-        os.remove(report_name) # delete report file after sent
+    if type in type_list:
+        header = {"Authorization": "Bearer "+api}
+        if type == "wt":
+            print("\nGenerating weekly training report...")
+            enrollments = _Fetch_WT_Report(api, header, exclude_newhire)# fetch enrollments via API
+            if enrollments:# check if enrollments is empty, doesn't send report if so
+                report_name = _Create_CSV(enrollments, client)
+                _Send_Email(recipient, sender, password, report_name)
+                os.remove(report_name)# delete report file after sent
+            else:
+                exit()
+        else:
+            if frequency in frequency_list:
+                datenow = datetime.now(timezone.utc)
+                if type == "t":
+                    print("\nGenerating training report for the following relative timeframe: " + frequency + " ...")
+                    enrollments = _Fetch_T_Report(header, frequency, datenow)
+                elif type == "p":
+                    exit()
+                elif type == "a":
+                    exit()
+            else:
+                print("The frequency specified is not compatible.")
+                _Opt_Help()
     else:
-        exit()
+        print("The type specified is not compatible. Please use the -t option and try again.\n")
+        _Opt_Help()
 
 main(argv[1:])
