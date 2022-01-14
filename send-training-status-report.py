@@ -1,7 +1,5 @@
-from sys import exit, argv, version
-print(version)
+from sys import exit, argv
 from datetime import datetime, timezone
-#import dateutil
 from dateutil.relativedelta import relativedelta
 import os
 import time
@@ -38,7 +36,7 @@ def _Opt_Help ():
             -s : the address you'll use for sending the report. This should be an organization approved account. The script is written to support O365 and an app password.
             -p : the email sender password, so that the client can authenticate in order to send the report on your behalf. The script is written to support O365 and an app password. Will not support MFA.
             -t : the type of report; acceptable inputs include "wt" for weekly training report, "t" for training report requiring timeframe, "p" for phishing report requiring timeframe, and "a" for full report requiring timeframe.
-            -f : the time period to include in the report(s); acceptable inputs include "year," "last_year," "year_to_date," "quarter," "month," and "week."
+            -f : the time period to include in the report(s); acceptable inputs include "year," "quarter," "month," and "week."
     """
 
     print(help)
@@ -48,11 +46,20 @@ def _Choose_Type ():
     prmpt = r"""Choose a report type
     """
 
+
 def _Calc_Date (datenow, frequency):
+    nm = 0# no. of months to subtract
+    nd = 0# no. of days to subtract
     if frequency == "quarter":
-        subtrct = 3
-    datepast = datenow - relativedelta(months=subtrct)
-    print("datepast: " + str(datepast))
+        nm = 3
+    elif frequency == "year":
+        nm = 12
+    elif frequency == "month":
+        nm = 1
+    elif frequency == "week":
+        nd = 7
+    datepast = datenow - relativedelta(months=nm)# this is a datetime object
+    datepast-=relativedelta(days=nd)
     return datepast
 
 def _Get_T_Campaigns (header):
@@ -111,26 +118,47 @@ def _Fetch_T_Report (header, frequency, datenow):
 
     print("Generating list of campaigns that fit the given timeframe: " + frequency + " ...")
     recent_campaigns = []
-    datepast = _Calc_Date(datenow, frequency)
-
+    datepast = _Calc_Date(datenow, frequency)# returns a datetime object that represents the earliest time to track to
 
     for campaign in campaign_data:# cycle through all campaigns and grab ones that fit within the given frequency
-        print(campaign['name'])
-        if campaign['end_date'] == None:
-            print("Campaign detected with Null end_date. Probably New Hire!")
-            exit()
-        if datetime.strptime(campaign['end_date'], "%Y-%m-%dT%H:%M:%S.%f%z") > datepast:# if campaign's end date is newer than the oldest point for which this report is looking...
-            print("You got a campaign match, buddy!")
-        #
-        #
-        #
-        # if "New Hire" in campaign.get('name') and exclude_newhire == True:
-        #     print("Skipping New Hire campaign...")
-        #     continue
-        # elif campaign.get('status') == "In Progress":
-        #     print(campaign['name'] + " is In Progress. Adding to list...")
-        #     active_campaigns.append(campaign)
-    exit()
+        datecampaign_start = datetime.strptime(campaign['start_date'], "%Y-%m-%dT%H:%M:%S.%f%z")
+        if campaign['end_date'] == None and "New Hire" in campaign.get('name') and campaign.get('status') == "In Progress":
+            print("An active New Hire campaign has been detected. Adding to list...")
+            recent_campaigns.append(campaign)
+        elif datecampaign_start > datepast and datecampaign_start < datenow:# if campaign's start date is newer than the oldest point for which this report is looking AND the campaign is not set in the future from now...
+            print("The campaign \"" + campaign['name'] + "\" falls within the desired report timeframe. Adding to list...")
+            recent_campaigns.append(campaign)
+        elif campaign.get('status') == "In Progress":
+            print("The campaign \"" + campaign['name'] + "\" does not fall within the desired report timeframe, but it is currently In Progress. Adding to list...")
+            recent_campaigns.append(campaign)
+        else:
+            print("The campaign \"" + campaign['name'] + "\" does not fall within the desired report timeframe. Skipping...")
+
+    print("Getting list of enrollments for each relevant campaign via KnowBe4 API...")
+    for campaign in recent_campaigns:# cycle through campaigns and gather completion status for each user enrolled
+
+        campaign_id = campaign['campaign_id']
+        enrollments = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/training/enrollments",params={"campaign_id": campaign_id,"per_page": 500},headers=header).text)
+
+        campaign_name = campaign['name']
+        for enrollment in enrollments:# reports on all New Hire enrollments, regardless of status, if New Hire is in the recent_campaigns list
+            enroll = {}
+            enroll['name'] = enrollment['user']['first_name'] + " " + enrollment['user']['last_name']
+            enroll['email'] = enrollment['user']['email']
+
+            user_id = str(enrollment['user']['id'])
+            time.sleep(1)
+            get_user = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/users/"+user_id,headers=header).text)
+            if get_user['status'] == 'archived':
+                continue
+            else:
+                enroll['manager'] = get_user['manager_name']
+                enroll['campaign'] = campaign_name
+                enroll['module'] = enrollment['module_name']
+                enroll['status'] = enrollment['status']
+                custom_enrollments.append(enroll)
+
+    return custom_enrollments
 
 def _Create_CSV (enrollments, client):
 
@@ -147,7 +175,7 @@ def _Create_CSV (enrollments, client):
 
 # construct email to send that contains csv attachment
 def _Send_Email (recipient, sender, password, report_name):
-    print("Sending CSV report as " + sender + "...")
+    print("Sending CSV report as " + sender + " to " + recipient + "...")
     msg = MIMEMultipart()
     msg["From"] = sender
     msg["To"] = recipient
@@ -206,7 +234,7 @@ def main (argv):
     exclude_newhire = False
     interactive = False
     type_list = ["wt", "t", "p", "a"]
-    frequency_list = ["year", "last_year", "year_to_date", "quarter", "month", "week"]
+    frequency_list = ["year", "quarter", "month", "week"]
     for opt, arg in opts:
         if opt == "-e":
             exclude_newhire = True
@@ -246,6 +274,12 @@ def main (argv):
                 if type == "t":
                     print("\nGenerating training report for the following relative timeframe: " + frequency + " ...")
                     enrollments = _Fetch_T_Report(header, frequency, datenow)
+                    if enrollments:# check if enrollments is empty, doesn't send report if so
+                        report_name = _Create_CSV(enrollments, client)
+                        _Send_Email(recipient, sender, password, report_name)
+                        os.remove(report_name)# delete report file after sent
+                    else:
+                        exit()
                 elif type == "p":
                     exit()
                 elif type == "a":
