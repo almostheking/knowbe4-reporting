@@ -62,15 +62,21 @@ def _Calc_Date (datenow, frequency):
     datepast-=relativedelta(days=nd)
     return datepast
 
-def _Get_T_Campaigns (header):
+def _Get_Campaigns (header, tp):
     print("Getting list of campaigns via KnowBe4 API...")
-    campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/training/campaigns",headers=header)
+    if tp == "t":
+        campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/training/campaigns",headers=header)
+    if tp == "p":
+        campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/phishing/campaigns",params={"campaign_id": "*","per_page": 500},headers=header)
+    else:
+        print("Could not generate list of campaigns, valid campaign type not given.")
+        exit(2)
     return json.loads(campaign_status_resp.text)
 
 def _Fetch_WT_Report (header, exclude_newhire):
     custom_enrollments = []# this is the list of report data we'll be returning from this function
 
-    campaign_data = _Get_T_Campaigns(header)
+    campaign_data = _Get_Campaigns(header, "t")
 
     print("Generating list of In Progress campaigns...")
     active_campaigns = []
@@ -114,7 +120,7 @@ def _Fetch_WT_Report (header, exclude_newhire):
 def _Fetch_T_Report (header, frequency, datenow):
     custom_enrollments = []# this is the list of report data we'll be returning from this function
 
-    campaign_data = _Get_T_Campaigns(header)
+    campaign_data = _Get_Campaigns(header, "t")
 
     print("Generating list of campaigns that fit the given timeframe: " + frequency + " ...")
     recent_campaigns = []
@@ -159,6 +165,71 @@ def _Fetch_T_Report (header, frequency, datenow):
                 custom_enrollments.append(enroll)
 
     return custom_enrollments
+
+def _Fetch_P_Report (header, frequency, datenow):
+    custom_enrollments = []# this is the list of report data we'll be returning from this function
+
+    campaign_data = _Get_Campaigns(header, "p")
+
+    print("Generating list of campaigns that fit the given timeframe: " + frequency + " ...")
+    recent_campaigns = []
+    recent_psts = []
+    datepast = _Calc_Date(datenow, frequency)# returns a datetime object that represents the earliest time to track to
+
+    for campaign in campaign_data:# cycle through all campaigns and grab ones that fit within the given frequency
+        datecampaign_start = datetime.strptime(campaign['last_run'], "%Y-%m-%dT%H:%M:%S.%f%z")
+        if datecampaign_start > datepast and datecampaign_start < datenow:# if campaign's start date is newer than the oldest point for which this report is looking AND the campaign is not set in the future from now...
+            print("The campaign \"" + campaign['name'] + "\" falls within the desired report timeframe. Adding to list...")
+            recent_campaigns.append(campaign)
+        elif campaign.get('status') == "In Progress":
+            print("The campaign \"" + campaign['name'] + "\" does not fall within the desired report timeframe, but it is currently In Progress. Adding to list...")
+            recent_campaigns.append(campaign)
+        else:
+            print("The campaign \"" + campaign['name'] + "\" does not fall within the desired report timeframe. Skipping...")
+
+    print("Getting list of enrollments for each relevant campaign via KnowBe4 API...")
+    for campaign in recent_campaigns:# cycle through campaigns and gather valid phishing tests (PSTs)
+
+        campaign_id = campaign['campaign_id']
+        psts = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/phishing/campaigns" + campaign_id + "/security_tests",params={"per_page": 500},headers=header).text)
+        for pst in psts:
+            datepst_start = datetime.strptime(pst['started_at'], "%Y-%m-%dT%H:%M:%S.%f%z")
+            if datepst_start > datepast and datepst_start < datenow:
+                print("The phishing test \"" + pst['name'] + "\" falls within the desired report timeframe. Adding to list...")
+                recent_psts.append(pst)
+            elif pst.get('status') == "Active":
+                print("The phishing test \"" + pst['name'] + "\" does not fall within the desired report timeframe, but it is currently Active. Adding to list...")
+                recent_psts.append(pst)
+            else:
+                print("The phishing test \"" + pst['name'] + "\" does not fall within the desired report timeframe. Skipping...")
+
+        for pst in recent_psts:# cycle through PSTs and gather phishing test status for each enrolled recipient part of the test/campaign
+            pst_id = pst['pst_id']
+            recipients = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/phishing/security_tests/" + pst_id + "/recipients",params={"per_page": 500},headers=header).text)
+            for recipient in recipients:
+                recpt = {}
+                recpt['name'] = recipient['user']['first_name'] + " " + recipient['user']['last_name']
+                recpt['email'] = recipient['user']['email']
+
+    #     campaign_name = campaign['name']
+    #     for enrollment in enrollments:# reports on all New Hire enrollments, regardless of status, if New Hire is in the recent_campaigns list
+    #         enroll = {}
+    #         enroll['name'] = enrollment['user']['first_name'] + " " + enrollment['user']['last_name']
+    #         enroll['email'] = enrollment['user']['email']
+    #
+    #         user_id = str(enrollment['user']['id'])
+    #         time.sleep(1)
+    #         get_user = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/users/"+user_id,headers=header).text)
+    #         if get_user['status'] == 'archived':
+    #             continue
+    #         else:
+    #             enroll['manager'] = get_user['manager_name']
+    #             enroll['campaign'] = campaign_name
+    #             enroll['module'] = enrollment['module_name']
+    #             enroll['status'] = enrollment['status']
+    #             custom_enrollments.append(enroll)
+    #
+    # return custom_enrollments
 
 def _Create_CSV (enrollments, client):
 
@@ -281,6 +352,10 @@ def main (argv):
                     else:
                         exit()
                 elif type == "p":
+                    print("\nGenerating phishing failures report for the following relative timeframe: " + frequency + " ...")
+                    enrollments = _Fetch_P_Report(header, frequency, datenow)
+                    if enrollments:
+                        exit()
                     exit()
                 elif type == "a":
                     exit()
