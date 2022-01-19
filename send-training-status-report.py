@@ -46,7 +46,6 @@ def _Choose_Type ():
     prmpt = r"""Choose a report type
     """
 
-
 def _Calc_Date (datenow, frequency):
     nm = 0# no. of months to subtract
     nd = 0# no. of days to subtract
@@ -167,7 +166,7 @@ def _Fetch_T_Report (header, frequency, datenow):
     return custom_enrollments
 
 def _Fetch_P_Report (header, frequency, datenow):
-    custom_enrollments = []# this is the list of report data we'll be returning from this function
+    custom_recipients = []# this is the list of report data we'll be returning from this function
 
     campaign_data = _Get_Campaigns(header, "p")
 
@@ -190,57 +189,67 @@ def _Fetch_P_Report (header, frequency, datenow):
     print("Getting list of enrollments for each relevant campaign via KnowBe4 API...")
     for campaign in recent_campaigns:# cycle through campaigns and gather valid phishing tests (PSTs)
 
-        campaign_id = campaign['campaign_id']
-        psts = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/phishing/campaigns" + campaign_id + "/security_tests",params={"per_page": 500},headers=header).text)
+        campaign_id = str(campaign['campaign_id'])
+        #print(campaign_id)
+        url = f"https://us.api.knowbe4.com/v1/phishing/campaigns/" + campaign_id + "/security_tests"
+        #print(url)
+        psts = json.loads(requests.get(url,params={"per_page": 500},headers=header).text)
         for pst in psts:
             datepst_start = datetime.strptime(pst['started_at'], "%Y-%m-%dT%H:%M:%S.%f%z")
             if datepst_start > datepast and datepst_start < datenow:
-                print("The phishing test \"" + pst['name'] + "\" falls within the desired report timeframe. Adding to list...")
+                print("The phishing test \"" + str(pst['pst_id']) + "\" falls within the desired report timeframe. Adding to list...")
                 recent_psts.append(pst)
             elif pst.get('status') == "Active":
-                print("The phishing test \"" + pst['name'] + "\" does not fall within the desired report timeframe, but it is currently Active. Adding to list...")
+                print("The phishing test \"" + str(pst['pst_id']) + "\" does not fall within the desired report timeframe, but it is currently Active. Adding to list...")
                 recent_psts.append(pst)
             else:
-                print("The phishing test \"" + pst['name'] + "\" does not fall within the desired report timeframe. Skipping...")
+                print("The phishing test \"" + str(pst['pst_id']) + "\" does not fall within the desired report timeframe. Skipping...")
 
         for pst in recent_psts:# cycle through PSTs and gather phishing test status for each enrolled recipient part of the test/campaign
-            pst_id = pst['pst_id']
+            pst_id = str(pst['pst_id'])
             recipients = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/phishing/security_tests/" + pst_id + "/recipients",params={"per_page": 500},headers=header).text)
             for recipient in recipients:
                 recpt = {}
                 recpt['name'] = recipient['user']['first_name'] + " " + recipient['user']['last_name']
                 recpt['email'] = recipient['user']['email']
 
-    #     campaign_name = campaign['name']
-    #     for enrollment in enrollments:# reports on all New Hire enrollments, regardless of status, if New Hire is in the recent_campaigns list
-    #         enroll = {}
-    #         enroll['name'] = enrollment['user']['first_name'] + " " + enrollment['user']['last_name']
-    #         enroll['email'] = enrollment['user']['email']
-    #
-    #         user_id = str(enrollment['user']['id'])
-    #         time.sleep(1)
-    #         get_user = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/users/"+user_id,headers=header).text)
-    #         if get_user['status'] == 'archived':
-    #             continue
-    #         else:
-    #             enroll['manager'] = get_user['manager_name']
-    #             enroll['campaign'] = campaign_name
-    #             enroll['module'] = enrollment['module_name']
-    #             enroll['status'] = enrollment['status']
-    #             custom_enrollments.append(enroll)
-    #
-    # return custom_enrollments
+                user_id = str(recipient['user']['id'])
+                time.sleep(1)# 400 milliseconds
+                get_user = json.loads(requests.get(f"https://us.api.knowbe4.com/v1/users/"+user_id,headers=header).text)
+                if get_user['status'] == 'archived':
+                    continue
+                else:
+                    recpt['manager'] = get_user['manager_name']
+                    recpt['campaign'] = campaign['name']
+                    recpt['template_name'] = recipient['template']['name']
+                    recpt['delivered_at'] = recipient['delivered_at']
+                    recpt['opened_at'] = recipient['opened_at']
+                    recpt['clicked_at'] = recipient['clicked_at']
+                    recpt['replied_at'] = recipient['replied_at']
+                    recpt['attachment_opened_at'] = recipient['attachment_opened_at']
+                    recpt['macro_enabled_at'] = recipient['macro_enabled_at']
+                    recpt['data_entered_at'] = recipient['data_entered_at']
+                    recpt['reported_at'] = recipient['reported_at']
+                    custom_recipients.append(recpt)
 
-def _Create_CSV (enrollments, client):
+    return custom_recipients
+
+def _Create_CSV (data, client, type):
 
     print("Generating CSV report to send...")
-    report_name = client+" Training Completion Status.csv"
+    if type == "t":
+        report_name = client+" Training Completion Status.csv"
+        columns = ["name","email","manager","campaign","module","status"]
+    elif type == "p":
+        report_name = client+" Phish Test Status.csv"
+        columns = ["name","email","manager","campaign","template_name","delivered_at","opened_at","clicked_at","replied_at","attachment_opened_at","macro_enabled_at","data_entered_at","reported_at"]
+    elif type == "a":
+        exit()
 
     with open(report_name, "w", newline="") as csv_file:# build csv file using data dict generated in API call function
-        columns = ["name","email","manager","campaign","module","status"]
         w = csv.DictWriter(csv_file, fieldnames=columns)
         w.writeheader()
-        w.writerows(enrollments)
+        w.writerows(data)
 
     return report_name
 
@@ -346,15 +355,18 @@ def main (argv):
                     print("\nGenerating training report for the following relative timeframe: " + frequency + " ...")
                     enrollments = _Fetch_T_Report(header, frequency, datenow)
                     if enrollments:# check if enrollments is empty, doesn't send report if so
-                        report_name = _Create_CSV(enrollments, client)
+                        report_name = _Create_CSV(enrollments, client, type)
                         _Send_Email(recipient, sender, password, report_name)
                         os.remove(report_name)# delete report file after sent
                     else:
                         exit()
                 elif type == "p":
                     print("\nGenerating phishing failures report for the following relative timeframe: " + frequency + " ...")
-                    enrollments = _Fetch_P_Report(header, frequency, datenow)
-                    if enrollments:
+                    recipients = _Fetch_P_Report(header, frequency, datenow)
+                    if recipients:
+                        report_name = _Create_CSV(recipients, client, type)
+                        _Send_Email(recipient, sender, password, report_name)
+                        os.remove(report_name)
                         exit()
                     exit()
                 elif type == "a":
