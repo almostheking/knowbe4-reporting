@@ -38,13 +38,12 @@ def _Opt_Help ():
             -t : the type of report; acceptable inputs include "wt" for weekly training report, "t" for training report requiring timeframe, "p" for phishing report requiring timeframe, and "a" for full report requiring timeframe.
             -f : the time period to include in the report(s); acceptable inputs include "year," "quarter," "month," and "week."
     """
-
     print(help)
     exit(2)
 
-def _Choose_Type ():
-    prmpt = r"""Choose a report type
-    """
+# def _Choose_Type ():
+#     prmpt = r"""Choose a report type
+#     """
 
 def _Calc_Date (datenow, frequency):
     nm = 0# no. of months to subtract
