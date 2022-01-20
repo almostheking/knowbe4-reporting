@@ -63,7 +63,7 @@ def _Calc_Date (datenow, frequency):
 # get a list of training or phishing campaign ids
 def _Get_Campaigns (header, tp):
     print("Getting list of campaigns via KnowBe4 API...")
-    if tp == "t":
+    if tp == "t" or tp == "wt":
         campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/training/campaigns",headers=header)
     if tp == "p":
         campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/phishing/campaigns",params={"campaign_id": "*","per_page": 500},headers=header)
