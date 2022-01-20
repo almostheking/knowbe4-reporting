@@ -376,10 +376,10 @@ def main (argv):
                         os.remove(report_name)
                     else:
                         exit()
-                elif type == "a":
-                    print("\nGenerating a full KnowBe4 report for the following relative timeframe: " + frequency + " ...")
-                    enrollments =
-                    exit()
+                # elif type == "a":
+                #     print("\nGenerating a full KnowBe4 report for the following relative timeframe: " + frequency + " ...")
+                #     enrollments =
+                #     exit()
             else:
                 print("The frequency specified is not compatible.")
                 _Opt_Help()
