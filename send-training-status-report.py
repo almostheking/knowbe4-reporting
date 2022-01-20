@@ -348,7 +348,7 @@ def main (argv):
         header = {"Authorization": "Bearer "+api}
         if type == "wt":
             print("\nGenerating weekly training report...")
-            enrollments = _Fetch_WT_Report(api, header, exclude_newhire)# fetch enrollments via API
+            enrollments = _Fetch_WT_Report(header, exclude_newhire)# fetch enrollments via API
             if enrollments:# check if enrollments is empty, doesn't send report if so
                 report_name = _Create_CSV(enrollments, client)
                 _Send_Email(recipient, sender, password, report_name)
