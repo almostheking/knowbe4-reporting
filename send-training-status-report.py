@@ -24,18 +24,17 @@ def _Opt_Help ():
            Example Usages:
                 Generate and send a weekly training report that only includes training status for active campaigns and, optionally, "New Hire" campaigns
                     python send-report2.py -a <API Key> -t wt -c ACME -r recipient@company.com -s sender@company.com -p <sender's app password>
-                Generate and send a full KnowBe4 raw data report for the past three months of activity (AKA, the last quarter)
-                    python send-report2.py -a <API Key> -t a -f quarter -c ACME -r recipient@company.com -s sender@company.com -p <sender's app password>
+                Generate and send a phishing report for the past three months of activity (AKA, the last quarter)
+                    python send-report2.py -a <API Key> -t p -f quarter -c ACME -r recipient@company.com -s sender@company.com -p <sender's app password>
 
             -h : print this help text.
             -e : exclude reporting on training campaigns that have "New Hire" in their names.
-            -i : indicates the script will be interactive on the CLI; without this, the script will fail with error messages if missing required variables.
             -a : the API key belonging to the KB4 admin account associated with the desired client.
             -c : the client name or acronym to be used when naming the report file. Has no bearing on the targeted KB4 client.
             -r : the recipient that will receive the email with the attached report.
             -s : the address you'll use for sending the report. This should be an organization approved account. The script is written to support O365 and an app password.
             -p : the email sender password, so that the client can authenticate in order to send the report on your behalf. The script is written to support O365 and an app password. Will not support MFA.
-            -t : the type of report; acceptable inputs include "wt" for weekly training report, "t" for training report requiring timeframe, "p" for phishing report requiring timeframe, and "a" for full report requiring timeframe.
+            -t : the type of report; acceptable inputs include "wt" for weekly training report, "t" for training report requiring timeframe, and "p" for phishing report requiring timeframe.
             -f : the time period to include in the report(s); acceptable inputs include "year," "quarter," "month," and "week."
     """
     print(help)
@@ -45,6 +44,7 @@ def _Opt_Help ():
 #     prmpt = r"""Choose a report type
 #     """
 
+# calculates the timeframe from which to draw data from the API
 def _Calc_Date (datenow, frequency):
     nm = 0# no. of months to subtract
     nd = 0# no. of days to subtract
@@ -60,6 +60,7 @@ def _Calc_Date (datenow, frequency):
     datepast-=relativedelta(days=nd)
     return datepast
 
+# get a list of training or phishing campaign ids
 def _Get_Campaigns (header, tp):
     print("Getting list of campaigns via KnowBe4 API...")
     if tp == "t":
@@ -71,6 +72,7 @@ def _Get_Campaigns (header, tp):
         exit(2)
     return json.loads(campaign_status_resp.text)
 
+# get data for weekly training status report from KB4 API
 def _Fetch_WT_Report (header, exclude_newhire):
     custom_enrollments = []# this is the list of report data we'll be returning from this function
 
@@ -115,6 +117,7 @@ def _Fetch_WT_Report (header, exclude_newhire):
 
     return custom_enrollments
 
+# get data for a training report from KB4 API
 def _Fetch_T_Report (header, frequency, datenow):
     custom_enrollments = []# this is the list of report data we'll be returning from this function
 
@@ -164,6 +167,7 @@ def _Fetch_T_Report (header, frequency, datenow):
 
     return custom_enrollments
 
+# get data for a phishing report from KB4 API
 def _Fetch_P_Report (header, frequency, datenow):
     custom_recipients = []# this is the list of report data we'll be returning from this function
 
@@ -233,6 +237,10 @@ def _Fetch_P_Report (header, frequency, datenow):
 
     return custom_recipients
 
+# def _Fetch_A_Report (header, frequency, datenow):
+#     exit()
+
+# pass data into a CSV file based on type of report
 def _Create_CSV (data, client, type):
 
     print("Generating CSV report to send...")
@@ -311,14 +319,14 @@ def main (argv):
         _Opt_Help()
 
     exclude_newhire = False
-    interactive = False
+    #interactive = False
     type_list = ["wt", "t", "p", "a"]
     frequency_list = ["year", "quarter", "month", "week"]
     for opt, arg in opts:
         if opt == "-e":
             exclude_newhire = True
-        elif opt == "-i":
-            interactive = True
+        # elif opt == "-i":
+        #     interactive = True
         elif opt == "-a":
             api = arg
         elif opt == "-c":
@@ -366,9 +374,11 @@ def main (argv):
                         report_name = _Create_CSV(recipients, client, type)
                         _Send_Email(recipient, sender, password, report_name)
                         os.remove(report_name)
+                    else:
                         exit()
-                    exit()
                 elif type == "a":
+                    print("\nGenerating a full KnowBe4 report for the following relative timeframe: " + frequency + " ...")
+                    enrollments =
                     exit()
             else:
                 print("The frequency specified is not compatible.")
