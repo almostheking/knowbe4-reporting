@@ -63,9 +63,9 @@ def _Calc_Date (datenow, frequency):
 # get a list of training or phishing campaign ids
 def _Get_Campaigns (header, tp):
     print("Getting list of campaigns via KnowBe4 API...")
-    if tp == "t" or tp == "wt":
+    if tp == "t":
         campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/training/campaigns",headers=header)
-    if tp == "p":
+    elif tp == "p":
         campaign_status_resp = requests.get(f"https://us.api.knowbe4.com/v1/phishing/campaigns",params={"campaign_id": "*","per_page": 500},headers=header)
     else:
         print("Could not generate list of campaigns, valid campaign type not given.")
@@ -350,7 +350,7 @@ def main (argv):
             print("\nGenerating weekly training report...")
             enrollments = _Fetch_WT_Report(header, exclude_newhire)# fetch enrollments via API
             if enrollments:# check if enrollments is empty, doesn't send report if so
-                report_name = _Create_CSV(enrollments, client)
+                report_name = _Create_CSV(enrollments, client, "t")
                 _Send_Email(recipient, sender, password, report_name)
                 os.remove(report_name)# delete report file after sent
             else:
