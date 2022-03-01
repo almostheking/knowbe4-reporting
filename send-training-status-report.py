@@ -245,7 +245,7 @@ def _Create_CSV (data, client, type):
 
     print("Generating CSV report to send...")
     if type == "t":
-        report_name = client+" Training Completion Status.csv"
+        report_name = "Security Awareness Training Status Report - "+client+".csv"
         columns = ["name","email","manager","campaign","module","status"]
     elif type == "p":
         report_name = client+" Phish Test Status.csv"
@@ -267,7 +267,8 @@ def _Send_Email (recipient, sender, password, report_name):
     msg["From"] = sender
     msg["To"] = recipient
     msg["Subject"] = report_name.split(".")[0]
-    body = f"""This report shows the status of current training campaigns broken down by user training completion status."""
+    body = f"""This report shows the status of current training campaigns broken down by user training completion status.
+                It should be sent to the client security point-of-contact in order to help them reach training completion compliance internally."""
     body = MIMEText(body)
     msg.attach(body)
     msg.preamble = report_name
